@@ -1,0 +1,61 @@
+.app {
+  box-sizing: border-box;
+  width: min(100%, 480px);
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.app h1 {
+  margin: 0 0 12px;
+}
+
+.app p {
+  color: #526071;
+}
+
+.app label {
+  display: block;
+  margin: 32px 0 8px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.app input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #a8b2c0;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.app input:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.qr-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 280px;
+  height: 280px;
+  margin: 32px auto 0;
+  border: 1px solid #d6dce5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.qr-preview canvas {
+  width: 256px;
+  height: 256px;
+}
+
+.qr-preview span {
+  position: absolute;
+  color: #687486;
+}
+
+.app .error {
+  color: #b42318;
+}
