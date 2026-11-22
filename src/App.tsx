@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
+import * as L from 'leaflet'
 import * as QRCode from 'qrcode'
 import './App.css'
+import 'leaflet/dist/leaflet.css'
+
+type Location = {
+  id: number
+  name: string
+  lat: number
+  lng: number
+}
 
 function App() {
   const [qrInput, setQrInput] = useState('')
   const [error, setError] = useState('')
+  const [locations, setLocations] = useState<Location[]>([])
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const nextLocationId = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -30,6 +41,120 @@ function App() {
     }
   }, [qrInput])
 
+  useEffect(() => {
+    const map = L.map('map').setView([38.0337, -78.5091], 15)
+    let activePopupActions: {
+      save: () => void
+      close: () => void
+      remove: () => void
+    } | null = null
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!activePopupActions) return
+
+      const action = event.key === 'Enter' ? activePopupActions.save
+        : event.key === 'Escape' ? activePopupActions.close
+          : event.key === 'Delete' ? activePopupActions.remove
+            : null
+
+      if (action) {
+        event.preventDefault()
+        event.stopPropagation()
+        action()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown, true)
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map)
+
+    map.on('click', (event) => {
+      const locationId = nextLocationId.current++
+      const location: Location = {
+        id: locationId,
+        name: '',
+        lat: Number(event.latlng.lat.toFixed(6)),
+        lng: Number(event.latlng.lng.toFixed(6)),
+      }
+
+      const popup = document.createElement('div')
+      popup.className = 'location-popup'
+
+      const label = document.createElement('label')
+      const input = document.createElement('input')
+      input.id = `location-name-${locationId}`
+      input.type = 'text'
+      label.htmlFor = input.id
+      label.textContent = 'Enter name for this location: '
+      const buttons = document.createElement('div')
+      buttons.className = 'location-popup-actions'
+      const saveButton = document.createElement('button')
+      saveButton.type = 'button'
+      saveButton.className = 'save-location'
+      saveButton.textContent = 'Save'
+      const deleteButton = document.createElement('button')
+      deleteButton.type = 'button'
+      deleteButton.className = 'delete-location'
+      deleteButton.textContent = 'Delete'
+      buttons.append(saveButton, deleteButton)
+      popup.append(label, input, buttons)
+
+      let saved = false
+      let savedName = ''
+      const marker = L.marker(event.latlng).addTo(map).bindPopup(popup)
+
+      const saveLocation = () => {
+        const wasSaved = saved
+        const updatedLocation = { ...location, name: input.value }
+        setLocations((currentLocations) => wasSaved
+          ? currentLocations.map((currentLocation) =>
+            currentLocation.id === locationId ? updatedLocation : currentLocation,
+          )
+          : [...currentLocations, updatedLocation],
+        )
+        saved = true
+        savedName = input.value
+        marker.closePopup()
+      }
+
+      const deleteLocation = () => {
+        marker.closePopup()
+        marker.remove()
+        setLocations((currentLocations) => currentLocations.filter((currentLocation) =>
+          currentLocation.id !== locationId,
+        ))
+      }
+
+      const actions = {
+        save: saveLocation,
+        close: () => marker.closePopup(),
+        remove: deleteLocation,
+      }
+
+      saveButton.addEventListener('click', saveLocation)
+      deleteButton.addEventListener('click', deleteLocation)
+      marker.on('popupopen', () => {
+        input.value = savedName
+        activePopupActions = actions
+        input.focus()
+      })
+      marker.on('popupclose', () => {
+        if (activePopupActions === actions) activePopupActions = null
+        if (!saved) marker.remove()
+        else input.value = savedName
+      })
+
+      marker.openPopup()
+    })
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true)
+      map.remove()
+    }
+  }, [])
+
   return (
     <main className="app">
       <h1>QR Code Generator</h1>
@@ -52,6 +177,17 @@ function App() {
         {!qrInput && <span>QR code preview</span>}
       </div>
       {error && <p role="alert" className="error">{error}</p>}
+
+      <section className="map-section" aria-labelledby="map-heading">
+        <h2 id="map-heading">Pin locations</h2>
+        <p>Click anywhere on the map to place a pin.</p>
+        <div id="map" className="map" aria-label="OpenStreetMap map" />
+
+        <h3>Locations</h3>
+        <pre className="locations" aria-live="polite">
+          {JSON.stringify(locations.map(({ name, lat, lng }) => ({ name, lat, lng })), null, 2)}
+        </pre>
+      </section>
     </main>
   )
 }
