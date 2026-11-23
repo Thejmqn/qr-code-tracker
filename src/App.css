@@ -139,3 +139,24 @@
   font: 0.9rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
   white-space: pre-wrap;
 }
+
+.api-test button {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.api-test button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.api-test button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}

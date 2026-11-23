@@ -11,10 +11,15 @@ type Location = {
   lng: number
 }
 
+const qrAPI: string = (import.meta.env.QR_BACKEND_API ?? '').trim().replace(/\/+$/, '')
+
 function App() {
   const [qrInput, setQrInput] = useState('')
   const [error, setError] = useState('')
   const [locations, setLocations] = useState<Location[]>([])
+  const [apiInput, setApiInput] = useState('')
+  const [apiStatus, setApiStatus] = useState('')
+  const [apiPending, setApiPending] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const nextLocationId = useRef(0)
 
@@ -155,6 +160,33 @@ function App() {
     }
   }, [])
 
+  const submitTracker = async (event: React.SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = apiInput.trim()
+    if (!name) {
+      setApiStatus('Enter a name to test the API.')
+      return
+    }
+    if (!qrAPI) {
+      setApiStatus('QR_BACKEND_API is not configured.')
+      return
+    }
+
+    setApiPending(true)
+    setApiStatus('')
+    try {
+      const response = await fetch(`${qrAPI}/tracker/${encodeURIComponent(name)}`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error(`Request failed (${response.status})`)
+      setApiStatus('Tracker created successfully.')
+    } catch (error) {
+      setApiStatus(error instanceof Error ? error.message : 'Could not reach the API.')
+    } finally {
+      setApiPending(false)
+    }
+  }
+
   return (
     <main className="app">
       <h1>QR Code Generator</h1>
@@ -187,6 +219,20 @@ function App() {
         <pre className="locations" aria-live="polite">
           {JSON.stringify(locations.map(({ name, lat, lng }) => ({ name, lat, lng })), null, 2)}
         </pre>
+
+        <form className="api-test" onSubmit={submitTracker}>
+          <label htmlFor="api-test-input">Test API</label>
+          <input
+            id="api-test-input"
+            type="text"
+            value={apiInput}
+            onChange={(event) => setApiInput(event.target.value)}
+          />
+          <button type="submit" disabled={apiPending}>
+            {apiPending ? 'Submitting…' : 'Submit'}
+          </button>
+          {apiStatus && <p role="status" aria-live="polite">{apiStatus}</p>}
+        </form>
       </section>
     </main>
   )

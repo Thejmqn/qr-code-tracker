@@ -11,6 +11,11 @@ npm run dev
 
 Run `npm run build` to create a production build.
 
+Set `QR_BACKEND_API` to the API root URL before starting Vite or building the
+frontend (for example, `http://localhost:8000` in PowerShell:
+`$env:QR_BACKEND_API = 'http://localhost:8000'`). The value is embedded in the
+browser bundle, so it must not contain secrets. Restart Vite after changing it.
+
 ## Tracker API
 
 Install `api/requirements.txt`, then put a server-side Supabase secret API key
