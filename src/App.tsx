@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as L from 'leaflet'
 import * as QRCode from 'qrcode'
+import { validate as isUuid, v4 as uuidv4 } from 'uuid'
 import './App.css'
 import 'leaflet/dist/leaflet.css'
 
@@ -11,15 +12,34 @@ type Location = {
   lng: number
 }
 
+type LinkIndex = {
+  trackers: string[]
+  locations: string[]
+}
+
+type CreatedTracker = {
+  tracker: { id: number; name: string | null; link: string; created_at: string }
+  locations: Array<{
+    id: number
+    tracker_id: number
+    name: string | null
+    latitude: number | null
+    longitude: number | null
+    link: string | null
+    created_at: string
+  }>
+}
+
 const qrAPI: string = (import.meta.env.QR_BACKEND_API ?? '').trim().replace(/\/+$/, '')
 
-function App() {
+function HomePage() {
   const [qrInput, setQrInput] = useState('')
   const [error, setError] = useState('')
   const [locations, setLocations] = useState<Location[]>([])
   const [apiInput, setApiInput] = useState('')
   const [apiStatus, setApiStatus] = useState('')
   const [apiPending, setApiPending] = useState(false)
+  const [createdTracker, setCreatedTracker] = useState<CreatedTracker | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const nextLocationId = useRef(0)
 
@@ -162,6 +182,7 @@ function App() {
 
   const submitTracker = async (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setCreatedTracker(null)
     const name = apiInput.trim()
     if (!name) {
       setApiStatus('Enter a name to test the API.')
@@ -175,16 +196,45 @@ function App() {
     setApiPending(true)
     setApiStatus('')
     try {
+      const trackerUuid = uuidv4()
       const response = await fetch(`${qrAPI}/tracker/${encodeURIComponent(name)}`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracker_uuid: trackerUuid,
+          locations: locations.map(({ name, lat, lng }) => ({
+            name,
+            lat,
+            lng,
+            uuid: uuidv4(),
+          })),
+        }),
       })
       if (!response.ok) throw new Error(`Request failed (${response.status})`)
+      const result = await response.json() as CreatedTracker
+      if (typeof result.tracker?.id !== 'number' || !Array.isArray(result.locations)) {
+        throw new Error('The API returned an invalid Tracker response.')
+      }
+      setCreatedTracker(result)
       setApiStatus('Tracker created successfully.')
     } catch (error) {
       setApiStatus(error instanceof Error ? error.message : 'Could not reach the API.')
     } finally {
       setApiPending(false)
     }
+  }
+
+  const downloadTracker = () => {
+    if (!createdTracker) return
+    const data = new Blob([JSON.stringify(createdTracker, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `tracker-${createdTracker.tracker.id}.json`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
   return (
@@ -232,10 +282,65 @@ function App() {
             {apiPending ? 'Submitting…' : 'Submit'}
           </button>
           {apiStatus && <p role="status" aria-live="polite">{apiStatus}</p>}
+          {createdTracker && (
+            <div className="api-result">
+              <p>Tracker Link: {createdTracker.tracker.link}</p>
+              <button type="button" onClick={downloadTracker}>Download JSON</button>
+            </div>
+          )}
         </form>
       </section>
     </main>
   )
+}
+
+function App() {
+  const [links, setLinks] = useState<LinkIndex | null>(null)
+  const [linksError, setLinksError] = useState(qrAPI ? '' : 'QR_BACKEND_API is not configured.')
+
+  useEffect(() => {
+    if (!qrAPI) return
+
+    const controller = new AbortController()
+    fetch(`${qrAPI}/links`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Could not load links (${response.status})`)
+        return response.json() as Promise<LinkIndex>
+      })
+      .then(setLinks)
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setLinksError(error instanceof Error ? error.message : 'Could not load links.')
+        }
+      })
+
+    return () => controller.abort()
+  }, [])
+
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (path === '/') return <HomePage />
+
+  if (linksError) return <main className="app"><p role="alert">{linksError}</p></main>
+  if (!links) return <main className="app"><p>Loading page…</p></main>
+
+  const trackerMatch = /^\/view\/([0-9a-f-]{36})$/i.exec(path)
+  if (trackerMatch && isUuid(trackerMatch[1]) && links.trackers.includes(path)) {
+    return <main className="app"><h1>Tracker</h1><p>UUID: {trackerMatch[1]}</p></main>
+  }
+
+  const locationMatch = /^\/track\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i.exec(path)
+  if (locationMatch && isUuid(locationMatch[1]) && isUuid(locationMatch[2])
+    && links.locations.includes(path)) {
+    return (
+      <main className="app">
+        <h1>Location</h1>
+        <p>Tracker UUID: {locationMatch[1]}</p>
+        <p>Location UUID: {locationMatch[2]}</p>
+      </main>
+    )
+  }
+
+  return <main className="app"><h1>Page not found</h1></main>
 }
 
 export default App
