@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import JSZip from 'jszip'
 import * as L from 'leaflet'
 import * as QRCode from 'qrcode'
 import { validate as isUuid, v4 as uuidv4 } from 'uuid'
@@ -30,41 +31,23 @@ type CreatedTracker = {
   }>
 }
 
+type LocationQRCode = {
+  id: number
+  name: string
+  dataUrl: string
+}
+
 const qrAPI: string = (import.meta.env.QR_BACKEND_API ?? '').trim().replace(/\/+$/, '')
 
 function HomePage() {
-  const [qrInput, setQrInput] = useState('')
-  const [error, setError] = useState('')
   const [locations, setLocations] = useState<Location[]>([])
   const [apiInput, setApiInput] = useState('')
   const [apiStatus, setApiStatus] = useState('')
   const [apiPending, setApiPending] = useState(false)
   const [createdTracker, setCreatedTracker] = useState<CreatedTracker | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [qrCodes, setQrCodes] = useState<LocationQRCode[] | null>(null)
+  const [zipPending, setZipPending] = useState(false)
   const nextLocationId = useRef(0)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    let active = true
-
-    if (!qrInput) {
-      canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
-      return
-    }
-
-    QRCode.toCanvas(canvas, qrInput, { width: 256, margin: 2 })
-      .then(() => {
-        if (active) setError('')
-      })
-      .catch(() => {
-        if (active) setError('Could not generate a QR code for this text.')
-      })
-
-    return () => {
-      active = false
-    }
-  }, [qrInput])
 
   useEffect(() => {
     const map = L.map('map').setView([38.0337, -78.5091], 15)
@@ -183,9 +166,10 @@ function HomePage() {
   const submitTracker = async (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
     setCreatedTracker(null)
+    setQrCodes(null)
     const name = apiInput.trim()
     if (!name) {
-      setApiStatus('Enter a name to test the API.')
+      setApiStatus('Enter a Tracker name.')
       return
     }
     if (!qrAPI) {
@@ -216,7 +200,23 @@ function HomePage() {
         throw new Error('The API returned an invalid Tracker response.')
       }
       setCreatedTracker(result)
-      setApiStatus('Tracker created successfully.')
+      try {
+        const codes = await Promise.all(result.locations.map(async (location) => {
+          if (!location.link?.startsWith('/track/')) {
+            throw new Error('A saved Location has an invalid link.')
+          }
+          const url = new URL(location.link, 'https://qr.servicerequest.org').href
+          return {
+            id: location.id,
+            name: location.name || `Location ${location.id}`,
+            dataUrl: await QRCode.toDataURL(url, { width: 256, margin: 2 }),
+          }
+        }))
+        setQrCodes(codes)
+        setApiStatus('Tracker and Location QR codes created successfully.')
+      } catch (error) {
+        setApiStatus(`Tracker created, but QR code generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
     } catch (error) {
       setApiStatus(error instanceof Error ? error.message : 'Could not reach the API.')
     } finally {
@@ -224,41 +224,48 @@ function HomePage() {
     }
   }
 
-  const downloadTracker = () => {
-    if (!createdTracker) return
-    const data = new Blob([JSON.stringify(createdTracker, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(data)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `tracker-${createdTracker.tracker.id}.json`
-    document.body.append(link)
-    link.click()
-    link.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 0)
+  const downloadTracker = async () => {
+    if (!createdTracker || !qrCodes) return
+    setZipPending(true)
+    try {
+      const zip = new JSZip()
+      zip.file(`tracker-${createdTracker.tracker.id}.json`, JSON.stringify(createdTracker, null, 2))
+      const usedNames = new Set<string>()
+      for (const code of qrCodes) {
+        const safeName = Array.from(
+          code.name.trim().replace(/[<>:"/\\|?*]/g, '_'),
+          (character) => character.charCodeAt(0) < 32 ? '_' : character,
+        ).join('').slice(0, 100).replace(/[. ]+$/g, '')
+        const baseName = safeName && !/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(safeName)
+          ? safeName : `Location ${code.id}`
+        let fileName = `${baseName}.png`
+        let suffix = 2
+        while (usedNames.has(fileName.toLowerCase())) {
+          fileName = `${baseName} (${suffix++}).png`
+        }
+        usedNames.add(fileName.toLowerCase())
+        zip.file(fileName, code.dataUrl.split(',')[1], { base64: true })
+      }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `tracker-${createdTracker.tracker.id}.zip`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch (error) {
+      setApiStatus(error instanceof Error ? error.message : 'Could not create the ZIP file.')
+    } finally {
+      setZipPending(false)
+    }
   }
 
   return (
     <main className="app">
-      <h1>QR Code Generator</h1>
-      <p>Enter text or a URL to create a QR code.</p>
-
-      <label htmlFor="qr-input">Text or URL</label>
-      <input
-        id="qr-input"
-        type="text"
-        value={qrInput}
-        onChange={(event) => {
-          setQrInput(event.target.value)
-          setError('')
-        }}
-        placeholder="https://example.com"
-      />
-
-      <div className="qr-preview">
-        <canvas ref={canvasRef} width="256" height="256" aria-label="Generated QR code" role="img" />
-        {!qrInput && <span>QR code preview</span>}
-      </div>
-      {error && <p role="alert" className="error">{error}</p>}
+      <h1>Location Tracker</h1>
+      <p>Add locations, then create a Tracker and download its QR codes.</p>
 
       <section className="map-section" aria-labelledby="map-heading">
         <h2 id="map-heading">Pin locations</h2>
@@ -271,7 +278,7 @@ function HomePage() {
         </pre>
 
         <form className="api-test" onSubmit={submitTracker}>
-          <label htmlFor="api-test-input">Test API</label>
+          <label htmlFor="api-test-input">Tracker name</label>
           <input
             id="api-test-input"
             type="text"
@@ -285,10 +292,25 @@ function HomePage() {
           {createdTracker && (
             <div className="api-result">
               <p>Tracker Link: {createdTracker.tracker.link}</p>
-              <button type="button" onClick={downloadTracker}>Download JSON</button>
+              {qrCodes && (
+                <button type="button" onClick={downloadTracker} disabled={zipPending}>
+                  {zipPending ? 'Preparing ZIP…' : 'Download ZIP'}
+                </button>
+              )}
             </div>
           )}
         </form>
+        {qrCodes && qrCodes.length > 0 && (
+          <section className="location-qr-codes" aria-label="Location QR codes">
+            <h3>Location QR codes</h3>
+            {qrCodes.map((code) => (
+              <figure key={code.id}>
+                <img src={code.dataUrl} alt={`QR code for ${code.name}`} width="256" height="256" />
+                <figcaption>{code.name}</figcaption>
+              </figure>
+            ))}
+          </section>
+        )}
       </section>
     </main>
   )

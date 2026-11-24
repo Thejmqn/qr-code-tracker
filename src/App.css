@@ -34,32 +34,6 @@
   outline-offset: 2px;
 }
 
-.qr-preview {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 280px;
-  height: 280px;
-  margin: 32px auto 0;
-  border: 1px solid #d6dce5;
-  border-radius: 12px;
-  background: #fff;
-}
-
-.qr-preview canvas {
-  width: 256px;
-  height: 256px;
-}
-
-.qr-preview span {
-  position: absolute;
-  color: #687486;
-}
-
-.app .error {
-  color: #b42318;
-}
-
 .map-section {
   margin-top: 40px;
   text-align: left;
@@ -159,4 +133,24 @@
 .api-test button:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.location-qr-codes {
+  margin-top: 32px;
+}
+
+.location-qr-codes figure {
+  margin: 16px 0;
+}
+
+.location-qr-codes img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+.location-qr-codes figcaption {
+  margin-top: 8px;
+  font-weight: 600;
 }

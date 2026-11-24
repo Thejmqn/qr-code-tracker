@@ -1,6 +1,6 @@
-# QR Code Generator
+# Location Tracker
 
-Enter text or a URL to generate a QR code in your browser.
+Create a Tracker with map locations and download their QR codes.
 
 ## Run locally
 
@@ -46,8 +46,11 @@ These are separate API operations: if the Location insert fails, the Tracker
 may already exist.
 
 On success, the POST response contains the saved `tracker` row and `locations`
-rows. The frontend shows the Tracker ID and offers a JSON download of this
-response.
+rows. The frontend generates a QR code for each Location's
+`https://qr.servicerequest.org/track/{tracker_uuid}/{location_uuid}` URL and
+offers a ZIP containing the saved JSON and one PNG per Location. PNG filenames
+use Location names; unsafe filename characters are replaced and duplicates
+receive numeric suffixes.
 
 `GET /links` returns all stored Tracker and Location link paths. The frontend
 loads this list on startup and renders `/view/{tracker_uuid}` and
