@@ -154,3 +154,16 @@
   margin-top: 8px;
   font-weight: 600;
 }
+
+.visits-page {
+  text-align: left;
+}
+
+.visits-location {
+  margin-top: 24px;
+}
+
+.visits-location li {
+  overflow-wrap: anywhere;
+  margin-bottom: 8px;
+}

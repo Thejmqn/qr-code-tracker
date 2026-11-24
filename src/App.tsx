@@ -18,6 +18,15 @@ type LinkIndex = {
   locations: string[]
 }
 
+type TrackerVisits = {
+  tracker_name: string | null
+  locations: Array<{
+    id: number
+    name: string | null
+    visits: Array<{ id: number; fingerprint: string | null; created_at: string }>
+  }>
+}
+
 type CreatedTracker = {
   tracker: { id: number; name: string | null; link: string; created_at: string }
   locations: Array<{
@@ -38,6 +47,108 @@ type LocationQRCode = {
 }
 
 const qrAPI: string = (import.meta.env.QR_BACKEND_API ?? '').trim().replace(/\/+$/, '')
+const fingerprintRequests = new Map<string, Promise<string>>()
+
+function recordFingerprint(locationLink: string): Promise<string> {
+  const existingRequest = fingerprintRequests.get(locationLink)
+  if (existingRequest) return existingRequest
+
+  const request = (async () => {
+    const { default: FingerprintJS } = await import('@fingerprintjs/fingerprintjs')
+    const agent = await FingerprintJS.load()
+    const { visitorId } = await agent.get()
+    const response = await fetch(`${qrAPI}/fingerprint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: locationLink, fingerprint: visitorId }),
+    })
+    if (!response.ok) throw new Error(`Could not record fingerprint (${response.status})`)
+    const result = await response.json() as { location_name: string }
+    return result.location_name
+  })()
+
+  fingerprintRequests.set(locationLink, request)
+  void request.catch(() => {
+    if (fingerprintRequests.get(locationLink) === request) {
+      fingerprintRequests.delete(locationLink)
+    }
+  })
+  return request
+}
+
+function LocationPage({ locationLink }: { locationLink: string }) {
+  const [locationName, setLocationName] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    recordFingerprint(locationLink)
+      .then((name) => {
+        if (active) setLocationName(name)
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Could not record fingerprint.')
+      })
+    return () => { active = false }
+  }, [locationLink])
+
+  return (
+    <main className="app">
+      {error && <p role="alert">{error}</p>}
+      {!error && !locationName && <p>Recording your visit…</p>}
+      {locationName && <h1>You have been fingerprinted at location {locationName}!</h1>}
+    </main>
+  )
+}
+
+function TrackerVisitsPage({ trackerUuid }: { trackerUuid: string }) {
+  const [report, setReport] = useState<TrackerVisits | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${qrAPI}/visits/${trackerUuid}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Could not load visits (${response.status})`)
+        return response.json() as Promise<TrackerVisits>
+      })
+      .then(setReport)
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) {
+          setError(reason instanceof Error ? reason.message : 'Could not load visits.')
+        }
+      })
+    return () => controller.abort()
+  }, [trackerUuid])
+
+  if (error) return <main className="app"><p role="alert">{error}</p></main>
+  if (!report) return <main className="app"><p>Loading visits…</p></main>
+
+  return (
+    <main className="app visits-page">
+      <h1>Visits for Tracker {report.tracker_name || 'Unnamed tracker'}:</h1>
+      {report.locations.length === 0 && <p>No locations yet.</p>}
+      {report.locations.map((location) => (
+        <section key={location.id} className="visits-location">
+          <h2>{location.name || 'Unnamed location'}</h2>
+          {location.visits.length === 0 ? <p>No visits yet.</p> : (
+            <ul>
+              {location.visits.map((visit) => (
+                <li key={visit.id}>
+                  <span>{visit.fingerprint || 'Unknown fingerprint'}</span>
+                  {' — '}
+                  <time dateTime={visit.created_at}>
+                    {new Date(visit.created_at).toLocaleString()}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+    </main>
+  )
+}
 
 function HomePage() {
   const [locations, setLocations] = useState<Location[]>([])
@@ -347,19 +458,13 @@ function App() {
 
   const trackerMatch = /^\/view\/([0-9a-f-]{36})$/i.exec(path)
   if (trackerMatch && isUuid(trackerMatch[1]) && links.trackers.includes(path)) {
-    return <main className="app"><h1>Tracker</h1><p>UUID: {trackerMatch[1]}</p></main>
+    return <TrackerVisitsPage trackerUuid={trackerMatch[1]} />
   }
 
   const locationMatch = /^\/track\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i.exec(path)
   if (locationMatch && isUuid(locationMatch[1]) && isUuid(locationMatch[2])
     && links.locations.includes(path)) {
-    return (
-      <main className="app">
-        <h1>Location</h1>
-        <p>Tracker UUID: {locationMatch[1]}</p>
-        <p>Location UUID: {locationMatch[2]}</p>
-      </main>
-    )
+    return <LocationPage locationLink={path} />
   }
 
   return <main className="app"><h1>Page not found</h1></main>

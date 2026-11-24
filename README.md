@@ -55,5 +55,11 @@ receive numeric suffixes.
 `GET /links` returns all stored Tracker and Location link paths. The frontend
 loads this list on startup and renders `/view/{tracker_uuid}` and
 `/track/{tracker_uuid}/{location_uuid}` pages for matching paths; these pages
-currently show only their UUIDs. Configure your frontend host to serve
-`index.html` for these paths so direct visits reach the app.
+show a Tracker visits report or, for a Location, record a FingerprintJS visitor ID and
+show the saved Location name. `GET /visits/{tracker_uuid}` returns the Tracker
+name, all of its Locations, and each Location's fingerprints and timestamps.
+`POST /fingerprint` accepts the Location link and
+fingerprint, stores them in Supabase, and returns the Location name. Configure
+your frontend host to serve `index.html` for these paths so direct visits reach
+the app. Visitor fingerprints are collected automatically on Location visits;
+provide appropriate privacy notice and retention controls for your deployment.

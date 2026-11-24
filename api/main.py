@@ -40,6 +40,11 @@ class TrackerPayload(BaseModel):
     locations: list[Location]
 
 
+class FingerprintPayload(BaseModel):
+    location: str
+    fingerprint: str
+
+
 @app.get("/")
 def read_root():
     return {"status": "ok"}
@@ -75,6 +80,96 @@ def list_links():
         "trackers": get_all_links("Tracker"),
         "locations": get_all_links("Location"),
     }
+
+
+@app.get("/visits/{tracker_uuid}")
+def get_tracker_visits(tracker_uuid: UUID):
+    tracker_response = (
+        supabase.table("Tracker")
+        .select("id,name")
+        .eq("link", f"/view/{tracker_uuid}")
+        .limit(1)
+        .execute()
+    )
+    if not tracker_response.data:
+        raise HTTPException(status_code=404, detail="Tracker not found")
+
+    tracker = tracker_response.data[0]
+    locations = []
+    offset = 0
+    while True:
+        response = (
+            supabase.table("Location")
+            .select("id,name,link")
+            .eq("tracker_id", tracker["id"])
+            .order("id")
+            .range(offset, offset + 999)
+            .execute()
+        )
+        rows = response.data or []
+        locations.extend(rows)
+        if len(rows) < 1000:
+            break
+        offset += 1000
+
+    visits_by_link = {location["link"]: [] for location in locations if location["link"]}
+    links = list(visits_by_link)
+    for index in range(0, len(links), 100):
+        batch = links[index:index + 100]
+        offset = 0
+        while True:
+            response = (
+                supabase.table("Fingerprint")
+                .select("id,location,fingerprint,created_at")
+                .in_("location", batch)
+                .order("id")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            rows = response.data or []
+            for row in rows:
+                visits_by_link[row["location"]].append({
+                    "id": row["id"],
+                    "fingerprint": row["fingerprint"],
+                    "created_at": row["created_at"],
+                })
+            if len(rows) < 1000:
+                break
+            offset += 1000
+
+    return {
+        "tracker_name": tracker["name"],
+        "locations": [
+            {
+                "id": location["id"],
+                "name": location["name"],
+                "visits": visits_by_link.get(location["link"], []),
+            }
+            for location in locations
+        ],
+    }
+
+
+@app.post("/fingerprint", status_code=201)
+def create_fingerprint(payload: FingerprintPayload):
+    location_response = (
+        supabase.table("Location")
+        .select("name")
+        .eq("link", payload.location)
+        .limit(1)
+        .execute()
+    )
+    if not location_response.data:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    fingerprint_response = supabase.table("Fingerprint").insert({
+        "location": payload.location,
+        "fingerprint": payload.fingerprint,
+    }).execute()
+    if not fingerprint_response.data:
+        raise HTTPException(status_code=502, detail="Fingerprint insert failed")
+
+    return {"location_name": location_response.data[0]["name"] or "Unnamed location"}
 
 
 @app.post("/tracker/{name}", status_code=201)
